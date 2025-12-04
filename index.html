@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>USF Reese vs Pearson Nebula</title>
+  <title>USF Reese vs The Pearson Nebula</title>
   <style>
     body {
       background: #000;
@@ -55,7 +55,7 @@
 
 <script>
 /*
-  Simple Super Star Trek–style game themed for Julian & Jamie
+  Super Star Trek–style game themed for Julian & Jamie
 
   Galaxy: 8x8 quadrants
   Each quadrant: 8x8 sectors
@@ -63,28 +63,23 @@
   Symbols (short-range scan):
     P = USF Reese (player)
     R = Rattler (enemy ship)
-    B = Starbase (Lasso / Flat Rock / Longmeadow / Base Julian/Jamie)
+    B = Starbase
     * = Star (obstacle)
     . = Empty space
 */
-  
 
 // --- Game constants ---
 const GALAXY_SIZE = 8;
 const SECTOR_SIZE = 8;
 const TOTAL_RATTLERS = 20;
-const TOTAL_BASES = 3; // plus optional 4th "brother base"
+const TOTAL_BASES = 3; // plus optional 4th brother base
 const MAX_STARDATES = 40;
 const INITIAL_ENERGY = 3000;
 const INITIAL_SHIELDS = 1000;
 const INITIAL_ROCKETS = 10;
 
-const MAX_RATTLERS_PER_QUADRANT = 4;  // or 3 for easier
-
-
-
-  
-  
+// cap enemies in one quadrant so it’s not insane
+const MAX_RATTLERS_PER_QUADRANT = 4;
 
 // --- DOM helpers ---
 const outEl = document.getElementById('output');
@@ -122,7 +117,6 @@ let rattlersRemaining = TOTAL_RATTLERS;
 // NEW: simple state flags
 let awaitingStartMenuChoice = true;
 let awaitingCaptainChoice = false;
-  
 
 // quadrant meta: { rattlers, bases: [baseName], stars, explored }
 function createEmptyQuadrant() {
@@ -164,7 +158,7 @@ function initGalaxy() {
   placePlayerRandomly();
 }
 
-// create empty 8x8
+// create empty 8x8 sector grid
 function createEmptySectorGrid() {
   const grid = new Array(SECTOR_SIZE);
   for (let x = 0; x < SECTOR_SIZE; x++) {
@@ -186,7 +180,6 @@ function placeBasesRandomly(baseNames) {
       if (!usedQuadrants.has(key)) {
         usedQuadrants.add(key);
         galaxy[qx][qy].bases.push(name);
-        // We'll place actual base position in sector grid later
         break;
       }
     }
@@ -195,11 +188,15 @@ function placeBasesRandomly(baseNames) {
 
 function placeRattlersRandomly(count) {
   let placed = 0;
-  while (placed < count) {
+  let safety = 0;
+  while (placed < count && safety < 2000) {
+    safety++;
     const qx = Math.floor(Math.random() * GALAXY_SIZE);
     const qy = Math.floor(Math.random() * GALAXY_SIZE);
-    galaxy[qx][qy].rattlers++;
-    placed++;
+    if (galaxy[qx][qy].rattlers < MAX_RATTLERS_PER_QUADRANT) {
+      galaxy[qx][qy].rattlers++;
+      placed++;
+    }
   }
 }
 
@@ -272,7 +269,7 @@ function shortRangeScan() {
   let lines = [];
   lines.push("Short-Range Scan (current quadrant)");
   lines.push("P = USF Reese, R = Rattler, B = Starbase, * = Star, . = Empty");
-  lines.push("Quadrant (" + (player.qx+1) + "," + (player.qy+1) + 
+  lines.push("Quadrant (" + (player.qx+1) + "," + (player.qy+1) +
              "), Sector (" + (player.sx+1) + "," + (player.sy+1) + ")");
   lines.push("");
 
@@ -307,11 +304,10 @@ function longRangeScan() {
       } else {
         const q = galaxy[qx][qy];
         q.explored = true; // reveal on map
-        const code = "" + const r = Math.min(q.rattlers, 9);
+        const r = Math.min(q.rattlers, 9);
         const b = Math.min(q.bases.length, 9);
         const s = Math.min(q.stars, 9);
         const code = "" + r + b + s;
-q.rattlers + q.bases.length + q.stars;
         row += " " + code.padStart(3, "0") + " ";
       }
     }
@@ -332,7 +328,10 @@ function showGalaxyMap() {
       if (!q.explored) {
         row += " ??? ";
       } else {
-        const code = "" + q.rattlers + q.bases.length + q.stars;
+        const r = Math.min(q.rattlers, 9);
+        const b = Math.min(q.bases.length, 9);
+        const s = Math.min(q.stars, 9);
+        const code = "" + r + b + s;
         row += " " + code.padStart(3, "0") + " ";
       }
     }
@@ -358,6 +357,7 @@ function isDockedOrAdjacentToBase() {
 }
 
 // --- Commands ---
+
 // Move within current quadrant: "go x y" (1-8, 1-8)
 function cmdGo(args) {
   if (args.length !== 2) {
@@ -377,7 +377,6 @@ function cmdGo(args) {
     return;
   }
 
-  // energy cost = distance
   const dist = Math.abs(player.sx - sx) + Math.abs(player.sy - sy);
   const cost = dist * 5;
   if (player.energy < cost) {
@@ -453,7 +452,6 @@ function cmdLaser(args) {
 
   const grid = sectors[player.qx][player.qy];
 
-  // count rattlers in this quadrant
   let rattlersHere = 0;
   for (let sx = 0; sx < SECTOR_SIZE; sx++) {
     for (let sy = 0; sy < SECTOR_SIZE; sy++) {
@@ -467,7 +465,6 @@ function cmdLaser(args) {
   }
 
   player.energy -= amount;
-  // simple: each rattler takes same chance to be destroyed
   let destroyed = 0;
   for (let sx = 0; sx < SECTOR_SIZE; sx++) {
     for (let sy = 0; sy < SECTOR_SIZE; sy++) {
@@ -504,20 +501,6 @@ function cmdRocket(args) {
     return;
   }
   let sx = parseInt(args[0], 10) - 1;
-  let sy = parseInt(args[1], 10, 10) - 1;
-}
-
-// Oops: fix rocket function (needed manual typing!)
-function cmdRocket(args) {
-  if (args.length !== 2) {
-    log("Usage: rocket x y  (sector coordinates 1-8)");
-    return;
-  }
-  if (player.rockets <= 0) {
-    log("No Reese Rockets remaining.");
-    return;
-  }
-  let sx = parseInt(args[0], 10) - 1;
   let sy = parseInt(args[1], 10) - 1;
   if (isNaN(sx) || isNaN(sy) || sx < 0 || sx >= SECTOR_SIZE || sy < 0 || sy >= SECTOR_SIZE) {
     log("Invalid sector coordinates.");
@@ -539,7 +522,6 @@ function cmdRocket(args) {
   } else if (grid[sx][sy] === "base") {
     log("Oh no! You hit a friendly base. It is destroyed.");
     grid[sx][sy] = "empty";
-    // remove one base from this quadrant
     if (galaxy[player.qx][player.qy].bases.length > 0) {
       galaxy[player.qx][player.qy].bases.pop();
     }
@@ -563,7 +545,7 @@ function cmdDock() {
   endTurn();
 }
 
-// Raise or lower shields: "shield amount"  (move energy <-> shield)
+// Raise or lower shields: "shield amount"
 function cmdShield(args) {
   if (args.length !== 1) {
     log("Usage: shield amount  (positive moves energy -> shield, negative the reverse)");
@@ -576,7 +558,6 @@ function cmdShield(args) {
   }
 
   if (delta > 0) {
-    // energy -> shield
     if (player.energy < delta) {
       log("Not enough reactor power for that.");
       return;
@@ -584,7 +565,6 @@ function cmdShield(args) {
     player.energy -= delta;
     player.shields += delta;
   } else {
-    // shield -> energy
     const amt = -delta;
     if (player.shields < amt) {
       log("Tía Jacky Shield can't drop that low.");
@@ -601,7 +581,7 @@ function cmdShield(args) {
 function showStatus() {
   log("=== Ship Status: USF Reese ===");
   log("Captain: " + captain);
-  log("Quadrant: (" + (player.qx+1) + "," + (player.qy+1) + 
+  log("Quadrant: (" + (player.qx+1) + "," + (player.qy+1) +
       ")  Sector: (" + (player.sx+1) + "," + (player.sy+1) + ")");
   log("Stardate: " + player.stardate + " / " + MAX_STARDATES);
   log("Energy: " + player.energy);
@@ -621,10 +601,9 @@ function enemyTurn() {
   }
   if (rattlersHere === 0) return;
 
-  // Simple: each rattler has small chance to fire
   let totalHits = 0;
   for (let i = 0; i < rattlersHere; i++) {
-    if (Math.random() < 0.3) { // 30% chance a rattler fires
+    if (Math.random() < 0.3) {
       const damage = 50 + Math.floor(Math.random() * 60);
       totalHits += damage;
     }
@@ -646,14 +625,12 @@ function enemyTurn() {
   }
 }
 
-// End of player action
 function endTurn() {
   player.stardate++;
   enemyTurn();
   checkWinLose();
 }
 
-// Win/lose checks
 function checkWinLose() {
   if (!player.alive) return;
   if (player.energy <= 0) {
@@ -675,91 +652,7 @@ function checkWinLose() {
   }
 }
 
-// --- Command processing ---
-let awaitingCaptainChoice = true;
-
-function printIntro() {
-  clearLog();
-  log("Welcome to USF Reese vs The Pearson Nebula");
-  log("-----------------------------------------");
-  log("The Rattler ships of the Pearson Nebula have invaded the Reese Galaxy.");
-  log("Your mission: Defend the family starbases and destroy all Rattlers.");
-  log("");
-  log("Before we begin, choose an option:");
-  log("  1) Start Mission");
-  log("  2) How to Play (Instructions)");
-  log("  3) Quick Demo (Example commands)");
-  log("");
-  log("Type 1, 2, or 3 and press Enter.");
-}
-
-function handleStartMenuChoice(choiceRaw) {
-  const choice = choiceRaw.trim();
-  if (choice === "1") {
-    // Start mission → go to captain selection
-    awaitingStartMenuChoice = false;
-    awaitingCaptainChoice = true;
-    log("");
-    log("Choose your captain:");
-    log("  1) Captain Julian Reese");
-    log("  2) Captain Jamie Reese");
-    log("");
-    log("Type 1 or 2 and press Enter.");
-  } else if (choice === "2") {
-    // Show instructions, then move on to captain selection
-    printInstructions();
-    log("");
-    log("Now let's begin the mission.");
-    awaitingStartMenuChoice = false;
-    awaitingCaptainChoice = true;
-    log("Choose your captain:");
-    log("  1) Captain Julian Reese");
-    log("  2) Captain Jamie Reese");
-    log("");
-  } else if (choice === "3") {
-    // Show demo, then move on to captain selection
-    printDemo();
-    log("");
-    log("Now let's begin the mission.");
-    awaitingStartMenuChoice = false;
-    awaitingCaptainChoice = true;
-    log("Choose your captain:");
-    log("  1) Captain Julian Reese");
-    log("  2) Captain Jamie Reese");
-    log("");
-  } else {
-    log("Please type 1, 2, or 3.");
-  }
-}
-
-  
-
-
-function finalizeCaptain(choice) {
-  if (choice === "1") {
-    captain = "Julian";
-    brotherBaseName = "Base Jamie";
-  } else if (choice === "2") {
-    captain = "Jamie";
-    brotherBaseName = "Base Julian";
-  } else {
-    log("Please type 1 or 2 to choose your captain.");
-    return;
-  }
-  awaitingCaptainChoice = false;
-  initGalaxy();
-  log("");
-  log("Captain " + captain + " aboard the USF Reese.");
-  log("Family starbases:");
-  log(" - Lasso Base");
-  log(" - Flat Rock Base");
-  log(" - Longmeadow Base");
-  if (brotherBaseName) log(" - " + brotherBaseName);
-  log("");
-  printHelp();
-  showStatus();
-  shortRangeScan();
-}
+// --- Instructions, demo, help ---
 
 function printInstructions() {
   log("");
@@ -825,10 +718,6 @@ function printDemo() {
   log("You can type 'instructions' any time in the game to see the full guide.");
 }
 
-
-
-  
-
 function printHelp() {
   log("");
   log("Available commands (first 3 letters are enough):");
@@ -847,6 +736,8 @@ function printHelp() {
   log("  help / computer  - Show this help list");
   log("");
 }
+
+// --- Command resolution for 3-letter abbreviations ---
 
 const COMMANDS = {
   status: "status",
@@ -867,10 +758,8 @@ const COMMANDS = {
 
 function resolveCommand(input) {
   const cmd = input.toLowerCase();
-  // exact match
   if (COMMANDS[cmd]) return COMMANDS[cmd];
 
-  // allow abbreviations of at least 3 letters if unambiguous
   if (cmd.length >= 3) {
     const matches = Object.keys(COMMANDS).filter(name => name.startsWith(cmd));
     if (matches.length === 1) {
@@ -880,12 +769,87 @@ function resolveCommand(input) {
   return null;
 }
 
+// --- Intro & menu state handling ---
 
+function printIntro() {
+  clearLog();
+  log("Welcome to USF Reese vs The Pearson Nebula");
+  log("-----------------------------------------");
+  log("The Rattler ships of the Pearson Nebula have invaded the Reese Galaxy.");
+  log("Your mission: Defend the family starbases and destroy all Rattlers.");
+  log("");
+  log("Before we begin, choose an option:");
+  log("  1) Start Mission");
+  log("  2) How to Play (Instructions)");
+  log("  3) Quick Demo (Example commands)");
+  log("");
+  log("Type 1, 2, or 3 and press Enter.");
+}
 
+function handleStartMenuChoice(choiceRaw) {
+  const choice = choiceRaw.trim();
+  if (choice === "1") {
+    awaitingStartMenuChoice = false;
+    awaitingCaptainChoice = true;
+    log("");
+    log("Choose your captain:");
+    log("  1) Captain Julian Reese");
+    log("  2) Captain Jamie Reese");
+    log("");
+    log("Type 1 or 2 and press Enter.");
+  } else if (choice === "2") {
+    printInstructions();
+    log("");
+    log("Now let's begin the mission.");
+    awaitingStartMenuChoice = false;
+    awaitingCaptainChoice = true;
+    log("Choose your captain:");
+    log("  1) Captain Julian Reese");
+    log("  2) Captain Jamie Reese");
+    log("");
+  } else if (choice === "3") {
+    printDemo();
+    log("");
+    log("Now let's begin the mission.");
+    awaitingStartMenuChoice = false;
+    awaitingCaptainChoice = true;
+    log("Choose your captain:");
+    log("  1) Captain Julian Reese");
+    log("  2) Captain Jamie Reese");
+    log("");
+  } else {
+    log("Please type 1, 2, or 3.");
+  }
+}
 
-  
+function finalizeCaptain(choice) {
+  if (choice === "1") {
+    captain = "Julian";
+    brotherBaseName = "Base Jamie";
+  } else if (choice === "2") {
+    captain = "Jamie";
+    brotherBaseName = "Base Julian";
+  } else {
+    log("Please type 1 or 2 to choose your captain.");
+    return;
+  }
+  awaitingCaptainChoice = false;
+  initGalaxy();
+  log("");
+  log("Captain " + captain + " aboard the USF Reese.");
+  log("Family starbases:");
+  log(" - Lasso Base");
+  log(" - Flat Rock Base");
+  log(" - Longmeadow Base");
+  if (brotherBaseName) log(" - " + brotherBaseName);
+  log("");
+  printHelp();
+  showStatus();
+  shortRangeScan();
+}
 
-// Main command handler
+// --- Main command handler ---
+
 function handleCommand() {
   const raw = cmdEl.value.trim();
   cmdEl.value = "";
