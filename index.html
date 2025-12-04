@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>USF Reese vs Pearson Nebula</title>
+  <style>
+    body {
+      background: #000;
+      color: #0f0;
+      font-family: Consolas, monospace;
+    }
+    #output {
+      width: 100%;
+      height: 60vh;
+      background: #000;
+      color: #0f0;
+      border: 1px solid #0f0;
+      padding: 8px;
+      box-sizing: border-box;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+    #commandBar {
+      margin-top: 8px;
+    }
+    #cmd {
+      width: 80%;
+      background: #000;
+      color: #0f0;
+      border: 1px solid #0f0;
+      padding: 4px;
+      font-family: Consolas, monospace;
+    }
+    button {
+      background: #111;
+      color: #0f0;
+      border: 1px solid #0f0;
+      padding: 4px 10px;
+      margin-left: 4px;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #020;
+    }
+  </style>
+</head>
+<body>
+  <h2>USF Reese vs The Pearson Nebula</h2>
+  <div id="output"></div>
+  <div id="commandBar">
+    <input id="cmd" autocomplete="off" />
+    <button onclick="handleCommand()">Enter</button>
+    <button onclick="printHelp()">Help</button>
+  </div>
+
+<script>
+/*
+  Simple Super Star Trek–style game themed for Julian & Jamie
+
+  Galaxy: 8x8 quadrants
+  Each quadrant: 8x8 sectors
+
+  Symbols (short-range scan):
+    P = USF Reese (player)
+    R = Rattler (enemy ship)
+    B = Starbase (Lasso / Flat Rock / Longmeadow / Base Julian/Jamie)
+    * = Star (obstacle)
+    . = Empty space
+*/
+
+// --- Game constants ---
+const GALAXY_SIZE = 8;
+const SECTOR_SIZE = 8;
+const TOTAL_RATTLERS = 20;
+const TOTAL_BASES = 3; // plus optional 4th "brother base"
+const MAX_STARDATES = 40;
+const INITIAL_ENERGY = 3000;
+const INITIAL_SHIELDS = 1000;
+const INITIAL_ROCKETS = 10;
+
+// --- DOM helpers ---
+const outEl = document.getElementById('output');
+const cmdEl = document.getElementById('cmd');
+
+function log(text = "") {
+  outEl.textContent += text + "\n";
+  outEl.scrollTop = outEl.scrollHeight;
+}
+
+function clearLog() {
+  outEl.textContent = "";
+}
+
+// --- Game state ---
+let captain = null;          // "Julian" or "Jamie"
+let brotherBaseName = null;  // "Base Julian" or "Base Jamie"
+
+let galaxy = [];             // [qx][qy] quadrant meta data
+let sectors = [];            // [qx][qy][sx][sy] sector grid
+let player = {
+  qx: 0,
+  qy: 0,
+  sx: 0,
+  sy: 0,
+  energy: INITIAL_ENERGY,
+  shields: INITIAL_SHIELDS,
+  rockets: INITIAL_ROCKETS,
+  stardate: 0,
+  alive: true
+};
+
+let rattlersRemaining = TOTAL_RATTLERS;
+
+// quadrant meta: { rattlers, bases: [baseName], stars, explored }
+function createEmptyQuadrant() {
+  return {
+    rattlers: 0,
+    bases: [],
+    stars: 0,
+    explored: false
+  };
+}
+
+// Initialize galaxy and sectors
+function initGalaxy() {
+  galaxy = new Array(GALAXY_SIZE);
+  sectors = new Array(GALAXY_SIZE);
+  for (let qx = 0; qx < GALAXY_SIZE; qx++) {
+    galaxy[qx] = new Array(GALAXY_SIZE);
+    sectors[qx] = new Array(GALAXY_SIZE);
+    for (let qy = 0; qy < GALAXY_SIZE; qy++) {
+      galaxy[qx][qy] = createEmptyQuadrant();
+      sectors[qx][qy] = createEmptySectorGrid();
+    }
+  }
+
+  // Place bases
+  const baseNames = ["Lasso Base", "Flat Rock Base", "Longmeadow Base"];
+  if (brotherBaseName) {
+    baseNames.push(brotherBaseName);
+  }
+  placeBasesRandomly(baseNames);
+
+  // Place rattlers
+  placeRattlersRandomly(TOTAL_RATTLERS);
+
+  // Populate stars and finalize sector layouts
+  fillStarsAndFinalizeSectors();
+
+  // Place player ship
+  placePlayerRandomly();
+}
+
+// create empty 8x8
+function createEmptySectorGrid() {
+  const grid = new Array(SECTOR_SIZE);
+  for (let x = 0; x < SECTOR_SIZE; x++) {
+    grid[x] = new Array(SECTOR_SIZE);
+    for (let y = 0; y < SECTOR_SIZE; y++) {
+      grid[x][y] = "empty";
+    }
+  }
+  return grid;
+}
+
+function placeBasesRandomly(baseNames) {
+  const usedQuadrants = new Set();
+  baseNames.forEach(name => {
+    while (true) {
+      const qx = Math.floor(Math.random() * GALAXY_SIZE);
+      const qy = Math.floor(Math.random() * GALAXY_SIZE);
+      const key = qx + "," + qy;
+      if (!usedQuadrants.has(key)) {
+        usedQuadrants.add(key);
+        galaxy[qx][qy].bases.push(name);
+        // We'll place actual base position in sector grid later
+        break;
+      }
+    }
+  });
+}
+
+function placeRattlersRandomly(count) {
+  let placed = 0;
+  while (placed < count) {
+    const qx = Math.floor(Math.random() * GALAXY_SIZE);
+    const qy = Math.floor(Math.random() * GALAXY_SIZE);
+    galaxy[qx][qy].rattlers++;
+    placed++;
+  }
+}
+
+function fillStarsAndFinalizeSectors() {
+  for (let qx = 0; qx < GALAXY_SIZE; qx++) {
+    for (let qy = 0; qy < GALAXY_SIZE; qy++) {
+      const grid = sectors[qx][qy];
+
+      // Add random stars
+      const numStars = 8 + Math.floor(Math.random() * 8); // 8–15 stars
+      let placedStars = 0;
+      while (placedStars < numStars) {
+        const sx = Math.floor(Math.random() * SECTOR_SIZE);
+        const sy = Math.floor(Math.random() * SECTOR_SIZE);
+        if (grid[sx][sy] === "empty") {
+          grid[sx][sy] = "star";
+          placedStars++;
+        }
+      }
+      galaxy[qx][qy].stars = numStars;
+
+      // Place bases
+      galaxy[qx][qy].bases.forEach(() => {
+        while (true) {
+          const sx = Math.floor(Math.random() * SECTOR_SIZE);
+          const sy = Math.floor(Math.random() * SECTOR_SIZE);
+          if (grid[sx][sy] === "empty") {
+            grid[sx][sy] = "base";
+            break;
+          }
+        }
+      });
+
+      // Place rattlers
+      let rattlersToPlace = galaxy[qx][qy].rattlers;
+      let placed = 0;
+      while (placed < rattlersToPlace) {
+        const sx = Math.floor(Math.random() * SECTOR_SIZE);
+        const sy = Math.floor(Math.random() * SECTOR_SIZE);
+        if (grid[sx][sy] === "empty") {
+          grid[sx][sy] = "rattler";
+          placed++;
+        }
+      }
+    }
+  }
+}
+
+function placePlayerRandomly() {
+  while (true) {
+    const qx = Math.floor(Math.random() * GALAXY_SIZE);
+    const qy = Math.floor(Math.random() * GALAXY_SIZE);
+    const grid = sectors[qx][qy];
+    const sx = Math.floor(Math.random() * SECTOR_SIZE);
+    const sy = Math.floor(Math.random() * SECTOR_SIZE);
+    if (grid[sx][sy] === "empty") {
+      player.qx = qx;
+      player.qy = qy;
+      player.sx = sx;
+      player.sy = sy;
+      grid[sx][sy] = "player";
+      break;
+    }
+  }
+}
+
+// --- Scans & display ---
+function shortRangeScan() {
+  const grid = sectors[player.qx][player.qy];
+  let lines = [];
+  lines.push("Short-Range Scan (current quadrant)");
+  lines.push("P = USF Reese, R = Rattler, B = Starbase, * = Star, . = Empty");
+  lines.push("Quadrant (" + (player.qx+1) + "," + (player.qy+1) + 
+             "), Sector (" + (player.sx+1) + "," + (player.sy+1) + ")");
+  lines.push("");
+
+  for (let sy = 0; sy < SECTOR_SIZE; sy++) {
+    let row = "";
+    for (let sx = 0; sx < SECTOR_SIZE; sx++) {
+      const cell = grid[sx][sy];
+      if (cell === "player") row += "P ";
+      else if (cell === "rattler") row += "R ";
+      else if (cell === "base") row += "B ";
+      else if (cell === "star") row += "* ";
+      else row += ". ";
+    }
+    lines.push(row);
+  }
+  log(lines.join("\n"));
+}
+
+function longRangeScan() {
+  let lines = [];
+  lines.push("Long-Range Scan (3x3 quadrants around you)");
+  lines.push("Each code = [Rattlers][Bases][Stars]");
+  lines.push("");
+
+  for (let dy = -1; dy <= 1; dy++) {
+    let row = "";
+    for (let dx = -1; dx <= 1; dx++) {
+      const qx = player.qx + dx;
+      const qy = player.qy + dy;
+      if (qx < 0 || qx >= GALAXY_SIZE || qy < 0 || qy >= GALAXY_SIZE) {
+        row += " *** ";
+      } else {
+        const q = galaxy[qx][qy];
+        q.explored = true; // reveal on map
+        const code = "" + q.rattlers + q.bases.length + q.stars;
+        row += " " + code.padStart(3, "0") + " ";
+      }
+    }
+    lines.push(row);
+  }
+  log(lines.join("\n"));
+}
+
+function showGalaxyMap() {
+  let lines = [];
+  lines.push("Galaxy Map (known quadrants)");
+  lines.push("Each cell = [Rattlers][Bases][Stars], ??? = unknown");
+  lines.push("");
+  for (let qy = 0; qy < GALAXY_SIZE; qy++) {
+    let row = "";
+    for (let qx = 0; qx < GALAXY_SIZE; qx++) {
+      const q = galaxy[qx][qy];
+      if (!q.explored) {
+        row += " ??? ";
+      } else {
+        const code = "" + q.rattlers + q.bases.length + q.stars;
+        row += " " + code.padStart(3, "0") + " ";
+      }
+    }
+    lines.push(row);
+  }
+  log(lines.join("\n"));
+}
+
+// --- Utility: find if adjacent to base ---
+function isDockedOrAdjacentToBase() {
+  const grid = sectors[player.qx][player.qy];
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      const sx = player.sx + dx;
+      const sy = player.sy + dy;
+      if (sx < 0 || sx >= SECTOR_SIZE || sy < 0 || sy >= SECTOR_SIZE) continue;
+      if (grid[sx][sy] === "base") {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// --- Commands ---
+// Move within current quadrant: "go x y" (1-8, 1-8)
+function cmdGo(args) {
+  if (args.length !== 2) {
+    log("Usage: go x y  (sector coordinates 1-8)");
+    return;
+  }
+  let sx = parseInt(args[0], 10) - 1;
+  let sy = parseInt(args[1], 10) - 1;
+  if (isNaN(sx) || isNaN(sy) || sx < 0 || sx >= SECTOR_SIZE || sy < 0 || sy >= SECTOR_SIZE) {
+    log("Invalid sector coordinates.");
+    return;
+  }
+
+  const grid = sectors[player.qx][player.qy];
+  if (grid[sx][sy] === "star") {
+    log("Tío Cris's Fix-It Computer says: There's a star in the way, Captain.");
+    return;
+  }
+
+  // energy cost = distance
+  const dist = Math.abs(player.sx - sx) + Math.abs(player.sy - sy);
+  const cost = dist * 5;
+  if (player.energy < cost) {
+    log("Not enough reactor power to move that far.");
+    return;
+  }
+
+  player.energy -= cost;
+  grid[player.sx][player.sy] = "empty";
+  player.sx = sx;
+  player.sy = sy;
+  grid[player.sx][player.sy] = "player";
+  log("Moved to sector (" + (sx+1) + "," + (sy+1) + "). Energy -" + cost + ".");
+  endTurn();
+}
+
+// Warp to another quadrant: "warp qx qy" (1-8,1-8)
+function cmdWarp(args) {
+  if (args.length !== 2) {
+    log("Usage: warp qx qy  (quadrant coordinates 1-8)");
+    return;
+  }
+  let qx = parseInt(args[0], 10) - 1;
+  let qy = parseInt(args[1], 10) - 1;
+  if (isNaN(qx) || isNaN(qy) || qx < 0 || qx >= GALAXY_SIZE || qy < 0 || qy >= GALAXY_SIZE) {
+    log("Invalid quadrant coordinates.");
+    return;
+  }
+  const cost = 150;
+  if (player.energy < cost) {
+    log("Not enough reactor power to warp.");
+    return;
+  }
+
+  // remove player from current grid
+  sectors[player.qx][player.qy][player.sx][player.sy] = "empty";
+
+  // place in new quadrant at random empty spot
+  const grid = sectors[qx][qy];
+  while (true) {
+    const sx = Math.floor(Math.random() * SECTOR_SIZE);
+    const sy = Math.floor(Math.random() * SECTOR_SIZE);
+    if (grid[sx][sy] === "empty") {
+      player.qx = qx;
+      player.qy = qy;
+      player.sx = sx;
+      player.sy = sy;
+      grid[sx][sy] = "player";
+      break;
+    }
+  }
+
+  player.energy -= cost;
+  log("Warped to quadrant (" + (qx+1) + "," + (qy+1) + ") at energy cost " + cost + ".");
+  endTurn();
+}
+
+// Fire "Reese Lasers": "laser amount"
+function cmdLaser(args) {
+  if (args.length !== 1) {
+    log("Usage: laser amount");
+    return;
+  }
+  let amount = parseInt(args[0], 10);
+  if (isNaN(amount) || amount <= 0) {
+    log("Laser amount must be positive.");
+    return;
+  }
+  if (amount > player.energy) {
+    log("You don't have that much reactor power.");
+    return;
+  }
+
+  const grid = sectors[player.qx][player.qy];
+
+  // count rattlers in this quadrant
+  let rattlersHere = 0;
+  for (let sx = 0; sx < SECTOR_SIZE; sx++) {
+    for (let sy = 0; sy < SECTOR_SIZE; sy++) {
+      if (grid[sx][sy] === "rattler") rattlersHere++;
+    }
+  }
+
+  if (rattlersHere === 0) {
+    log("No Rattlers in this quadrant to fire at.");
+    return;
+  }
+
+  player.energy -= amount;
+  // simple: each rattler takes same chance to be destroyed
+  let destroyed = 0;
+  for (let sx = 0; sx < SECTOR_SIZE; sx++) {
+    for (let sy = 0; sy < SECTOR_SIZE; sy++) {
+      if (grid[sx][sy] === "rattler") {
+        const chance = amount / (rattlersHere * 400); // tweak factor
+        if (Math.random() < chance) {
+          grid[sx][sy] = "empty";
+          destroyed++;
+          galaxy[player.qx][player.qy].rattlers--;
+          rattlersRemaining--;
+        }
+      }
+    }
+  }
+
+  log("Reese Lasers fired for " + amount + " energy.");
+  if (destroyed > 0) {
+    log("You destroyed " + destroyed + " Rattler(s)!");
+  } else {
+    log("Tía Jacky Shield glows, but no Rattlers were hit this time.");
+  }
+  checkWinLose();
+  endTurn();
+}
+
+// Fire "Reese Rockets": "rocket x y"
+function cmdRocket(args) {
+  if (args.length !== 2) {
+    log("Usage: rocket x y  (sector coordinates 1-8)");
+    return;
+  }
+  if (player.rockets <= 0) {
+    log("No Reese Rockets remaining.");
+    return;
+  }
+  let sx = parseInt(args[0], 10) - 1;
+  let sy = parseInt(args[1], 10, 10) - 1;
+}
+
+// Oops: fix rocket function (needed manual typing!)
+function cmdRocket(args) {
+  if (args.length !== 2) {
+    log("Usage: rocket x y  (sector coordinates 1-8)");
+    return;
+  }
+  if (player.rockets <= 0) {
+    log("No Reese Rockets remaining.");
+    return;
+  }
+  let sx = parseInt(args[0], 10) - 1;
+  let sy = parseInt(args[1], 10) - 1;
+  if (isNaN(sx) || isNaN(sy) || sx < 0 || sx >= SECTOR_SIZE || sy < 0 || sy >= SECTOR_SIZE) {
+    log("Invalid sector coordinates.");
+    return;
+  }
+
+  const grid = sectors[player.qx][player.qy];
+  player.rockets--;
+  log("Reese Rocket launched at sector (" + (sx+1) + "," + (sy+1) + ").");
+
+  if (grid[sx][sy] === "rattler") {
+    grid[sx][sy] = "empty";
+    galaxy[player.qx][player.qy].rattlers--;
+    rattlersRemaining--;
+    log("Direct hit! Rattler destroyed.");
+    checkWinLose();
+  } else if (grid[sx][sy] === "star") {
+    log("You blew up a star. Tío Cris mutters something about physics.");
+  } else if (grid[sx][sy] === "base") {
+    log("Oh no! You hit a friendly base. It is destroyed.");
+    grid[sx][sy] = "empty";
+    // remove one base from this quadrant
+    if (galaxy[player.qx][player.qy].bases.length > 0) {
+      galaxy[player.qx][player.qy].bases.pop();
+    }
+  } else {
+    log("The rocket flies through empty space.");
+  }
+  endTurn();
+}
+
+// Dock at base (refuel & repair): "dock"
+function cmdDock() {
+  if (!isDockedOrAdjacentToBase()) {
+    log("No base close enough to dock, Captain.");
+    return;
+  }
+  player.energy = INITIAL_ENERGY;
+  player.shields = INITIAL_SHIELDS;
+  player.rockets = INITIAL_ROCKETS;
+  log("Docked at starbase. Tío Cris's Fix-It Computer restores systems.");
+  log("Energy, Tía Jacky Shield, and Reese Rockets refilled.");
+  endTurn();
+}
+
+// Raise or lower shields: "shield amount"  (move energy <-> shield)
+function cmdShield(args) {
+  if (args.length !== 1) {
+    log("Usage: shield amount  (positive moves energy -> shield, negative the reverse)");
+    return;
+  }
+  let delta = parseInt(args[0], 10);
+  if (isNaN(delta) || delta === 0) {
+    log("Shield change must be non-zero.");
+    return;
+  }
+
+  if (delta > 0) {
+    // energy -> shield
+    if (player.energy < delta) {
+      log("Not enough reactor power for that.");
+      return;
+    }
+    player.energy -= delta;
+    player.shields += delta;
+  } else {
+    // shield -> energy
+    const amt = -delta;
+    if (player.shields < amt) {
+      log("Tía Jacky Shield can't drop that low.");
+      return;
+    }
+    player.shields -= amt;
+    player.energy += amt;
+  }
+  log("Tía Jacky Shield adjusted. Shields: " + player.shields + ", Energy: " + player.energy);
+  endTurn();
+}
+
+// Show status: "status"
+function showStatus() {
+  log("=== Ship Status: USF Reese ===");
+  log("Captain: " + captain);
+  log("Quadrant: (" + (player.qx+1) + "," + (player.qy+1) + 
+      ")  Sector: (" + (player.sx+1) + "," + (player.sy+1) + ")");
+  log("Stardate: " + player.stardate + " / " + MAX_STARDATES);
+  log("Energy: " + player.energy);
+  log("Tía Jacky Shield: " + player.shields);
+  log("Reese Rockets: " + player.rockets);
+  log("Rattlers remaining in galaxy: " + rattlersRemaining);
+}
+
+// Enemy turn: simple chance to hit player if Rattlers in same quadrant
+function enemyTurn() {
+  const grid = sectors[player.qx][player.qy];
+  let rattlersHere = 0;
+  for (let sx = 0; sx < SECTOR_SIZE; sx++) {
+    for (let sy = 0; sy < SECTOR_SIZE; sy++) {
+      if (grid[sx][sy] === "rattler") rattlersHere++;
+    }
+  }
+  if (rattlersHere === 0) return;
+
+  // Simple: each rattler has small chance to fire
+  let totalHits = 0;
+  for (let i = 0; i < rattlersHere; i++) {
+    if (Math.random() < 0.3) { // 30% chance a rattler fires
+      const damage = 50 + Math.floor(Math.random() * 60);
+      totalHits += damage;
+    }
+  }
+
+  if (totalHits > 0) {
+    log("Rattlers fire on the USF Reese from the Pearson Nebula!");
+    if (player.shields > 0) {
+      const absorbed = Math.min(player.shields, totalHits);
+      player.shields -= absorbed;
+      totalHits -= absorbed;
+      log("Tía Jacky Shield absorbs " + absorbed + " damage. Shields now " + player.shields + ".");
+    }
+    if (totalHits > 0) {
+      player.energy -= totalHits;
+      log("Hull hit! Reactor power -" + totalHits + ". Energy now " + player.energy + ".");
+    }
+    checkWinLose();
+  }
+}
+
+// End of player action
+function endTurn() {
+  player.stardate++;
+  enemyTurn();
+  checkWinLose();
+}
+
+// Win/lose checks
+function checkWinLose() {
+  if (!player.alive) return;
+  if (player.energy <= 0) {
+    player.alive = false;
+    log("Reactor power has failed. The USF Reese is lost.");
+    log("GAME OVER.");
+    return;
+  }
+  if (player.stardate > MAX_STARDATES) {
+    player.alive = false;
+    log("Stardate limit exceeded. The Pearson Nebula Rattlers overrun the Reese Galaxy.");
+    log("GAME OVER.");
+    return;
+  }
+  if (rattlersRemaining <= 0) {
+    player.alive = false;
+    log("All Rattlers destroyed! The Reese family bases are safe.");
+    log("YOU WIN, Captain " + captain + "!");
+  }
+}
+
+// --- Command processing ---
+let awaitingCaptainChoice = true;
+
+function printIntro() {
+  clearLog();
+  log("Welcome to USF Reese vs The Pearson Nebula");
+  log("-----------------------------------------");
+  log("The Rattler ships of the Pearson Nebula have invaded the Reese Galaxy.");
+  log("Your mission: Defend the family starbases and destroy all Rattlers.");
+  log("");
+  log("Choose your captain:");
+  log("  1) Captain Julian Reese");
+  log("  2) Captain Jamie Reese");
+  log("");
+  log("Type 1 or 2 and press Enter.");
+}
+
+function finalizeCaptain(choice) {
+  if (choice === "1") {
+    captain = "Julian";
+    brotherBaseName = "Base Jamie";
+  } else if (choice === "2") {
+    captain = "Jamie";
+    brotherBaseName = "Base Julian";
+  } else {
+    log("Please type 1 or 2 to choose your captain.");
+    return;
+  }
+  awaitingCaptainChoice = false;
+  initGalaxy();
+  log("");
+  log("Captain " + captain + " aboard the USF Reese.");
+  log("Family starbases:");
+  log(" - Lasso Base");
+  log(" - Flat Rock Base");
+  log(" - Longmeadow Base");
+  if (brotherBaseName) log(" - " + brotherBaseName);
+  log("");
+  printHelp();
+  showStatus();
+  shortRangeScan();
+}
+
+function printHelp() {
+  log("");
+  log("Available commands:");
+  log("  status           - Show ship status");
+  log("  srs              - Short-range scan (current quadrant)");
+  log("  lrs              - Long-range scan (nearby quadrants)");
+  log("  map              - Show known galaxy map");
+  log("  go x y           - Move within this quadrant to sector (1-8,1-8)");
+  log("  warp qx qy       - Warp to quadrant (1-8,1-8)");
+  log("  laser amount     - Fire Reese Lasers using given energy");
+  log("  rocket x y       - Fire a Reese Rocket at sector (1-8,1-8)");
+  log("  dock             - Dock at nearby base to refuel & repair");
+  log("  shield amount    - Move energy to/from Tía Jacky Shield");
+  log("  help             - Show this help");
+  log("");
+}
+
+// Main command handler
+function handleCommand() {
+  const raw = cmdEl.value.trim();
+  cmdEl.value = "";
+  if (!raw) return;
+  log("> " + raw);
+
+  if (awaitingCaptainChoice) {
+    finalizeCaptain(raw);
+    return;
+  }
+
+  if (!player.alive) {
+    log("The game has ended. Reload the page to start a new mission.");
+    return;
+  }
+
+  const parts = raw.split(/\s+/);
+  const cmd = parts[0].toLowerCase();
+  const args = parts.slice(1);
+
+  switch (cmd) {
+    case "status":
+      showStatus();
+      break;
+    case "srs":
+      shortRangeScan();
+      break;
+    case "lrs":
+      longRangeScan();
+      break;
+    case "map":
+      showGalaxyMap();
+      break;
+    case "go":
+      cmdGo(args);
+      break;
+    case "warp":
+      cmdWarp(args);
+      break;
+    case "laser":
+      cmdLaser(args);
+      break;
+    case "rocket":
+      cmdRocket(args);
+      break;
+    case "dock":
+      cmdDock();
+      break;
+    case "shield":
+      cmdShield(args);
+      break;
+    case "help":
+      printHelp();
+      break;
+    default:
+      log("Unknown command. Type 'help' for a list of commands.");
+  }
+}
+
+// Enter key to submit
+cmdEl.addEventListener("keydown", function(e) {
+  if (e.key === "Enter") {
+    handleCommand();
+  }
+});
+
+// Initialize
+printIntro();
+cmdEl.focus();
+</script>
+</body>
+</html>
