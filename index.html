@@ -377,6 +377,14 @@ function cmdGo(args) {
     return;
   }
 
+  // NEW: prevent landing on a base — you must dock from a neighboring square
+  if (grid[sx][sy] === "base") {
+    log("There's a starbase at that sector, Captain. Move next to it and use 'dock'.");
+    return;
+  }
+
+  
+
   const dist = Math.abs(player.sx - sx) + Math.abs(player.sy - sy);
   const cost = dist * 5;
   if (player.energy < cost) {
