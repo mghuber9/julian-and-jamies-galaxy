@@ -67,6 +67,7 @@
     * = Star (obstacle)
     . = Empty space
 */
+  
 
 // --- Game constants ---
 const GALAXY_SIZE = 8;
@@ -77,6 +78,13 @@ const MAX_STARDATES = 40;
 const INITIAL_ENERGY = 3000;
 const INITIAL_SHIELDS = 1000;
 const INITIAL_ROCKETS = 10;
+
+const MAX_RATTLERS_PER_QUADRANT = 4;  // or 3 for easier
+
+
+
+  
+  
 
 // --- DOM helpers ---
 const outEl = document.getElementById('output');
@@ -110,6 +118,11 @@ let player = {
 };
 
 let rattlersRemaining = TOTAL_RATTLERS;
+
+// NEW: simple state flags
+let awaitingStartMenuChoice = true;
+let awaitingCaptainChoice = false;
+  
 
 // quadrant meta: { rattlers, bases: [baseName], stars, explored }
 function createEmptyQuadrant() {
@@ -672,12 +685,55 @@ function printIntro() {
   log("The Rattler ships of the Pearson Nebula have invaded the Reese Galaxy.");
   log("Your mission: Defend the family starbases and destroy all Rattlers.");
   log("");
-  log("Choose your captain:");
-  log("  1) Captain Julian Reese");
-  log("  2) Captain Jamie Reese");
+  log("Before we begin, choose an option:");
+  log("  1) Start Mission");
+  log("  2) How to Play (Instructions)");
+  log("  3) Quick Demo (Example commands)");
   log("");
-  log("Type 1 or 2 and press Enter.");
+  log("Type 1, 2, or 3 and press Enter.");
 }
+
+function handleStartMenuChoice(choiceRaw) {
+  const choice = choiceRaw.trim();
+  if (choice === "1") {
+    // Start mission → go to captain selection
+    awaitingStartMenuChoice = false;
+    awaitingCaptainChoice = true;
+    log("");
+    log("Choose your captain:");
+    log("  1) Captain Julian Reese");
+    log("  2) Captain Jamie Reese");
+    log("");
+    log("Type 1 or 2 and press Enter.");
+  } else if (choice === "2") {
+    // Show instructions, then move on to captain selection
+    printInstructions();
+    log("");
+    log("Now let's begin the mission.");
+    awaitingStartMenuChoice = false;
+    awaitingCaptainChoice = true;
+    log("Choose your captain:");
+    log("  1) Captain Julian Reese");
+    log("  2) Captain Jamie Reese");
+    log("");
+  } else if (choice === "3") {
+    // Show demo, then move on to captain selection
+    printDemo();
+    log("");
+    log("Now let's begin the mission.");
+    awaitingStartMenuChoice = false;
+    awaitingCaptainChoice = true;
+    log("Choose your captain:");
+    log("  1) Captain Julian Reese");
+    log("  2) Captain Jamie Reese");
+    log("");
+  } else {
+    log("Please type 1, 2, or 3.");
+  }
+}
+
+  
+
 
 function finalizeCaptain(choice) {
   if (choice === "1") {
@@ -705,9 +761,77 @@ function finalizeCaptain(choice) {
   shortRangeScan();
 }
 
+function printInstructions() {
+  log("");
+  log("=== Mission Briefing ===");
+  log("You command the USF Reese, defending the Reese Galaxy from Rattlers");
+  log("of the Pearson Nebula.");
+  log("");
+  log("Goal:");
+  log("  - Destroy all Rattlers before the stardate limit is reached.");
+  log("  - Protect the family starbases: Lasso, Flat Rock, Longmeadow,");
+  log("    and your brother's base.");
+  log("");
+  log("Scans:");
+  log("  srs  - Short-range scan shows the 8x8 sector grid in your quadrant.");
+  log("  lrs  - Long-range scan shows a 3x3 block of quadrants around you.");
+  log("         Each code = [Rattlers][Bases][Stars].");
+  log("  map  - Shows all quadrants you've seen with lrs so far.");
+  log("");
+  log("Movement:");
+  log("  go x y      - Move inside this quadrant to sector (1-8,1-8).");
+  log("                Costs a little energy per square moved.");
+  log("  warp qx qy  - Warp to quadrant (1-8,1-8). Costs more energy.");
+  log("");
+  log("Combat:");
+  log("  laser N     - Fire Reese Lasers using N energy. Good vs many Rattlers");
+  log("                in your quadrant (no aiming needed).");
+  log("  rocket x y  - Fire a Reese Rocket at a specific sector in your");
+  log("                quadrant (1-8,1-8). Precise but limited.");
+  log("");
+  log("Bases & Shields:");
+  log("  dock        - If you're next to a base, refills energy, shields,");
+  log("                and rockets (Tío Cris fixes everything).");
+  log("  shield N    - Move N energy into Tía Jacky Shield.");
+  log("  shield -N   - Move N energy back out of shields into the reactor.");
+  log("");
+  log("Status & Help:");
+  log("  status      - Show ship status and remaining Rattlers.");
+  log("  help        - Show command list.");
+  log("  computer    - Same as 'help' (ask the ship's computer).");
+  log("");
+  log("Try: srs, lrs, status, then go/warp, then laser/rocket when you");
+  log("find Rattlers. Dock at bases when low on power.");
+  log("");
+}
+
+function printDemo() {
+  log("");
+  log("=== Quick Demo ===");
+  log("Example sequence:");
+  log("  1) Type:  lrs");
+  log("     See nearby quadrants and scout for Rattlers/bases.");
+  log("  2) Type:  warp 4 4");
+  log("     Warp closer to action.");
+  log("  3) Type:  srs");
+  log("     See the local 8x8 sector grid.");
+  log("  4) If you see Rattlers, try:");
+  log("       laser 300");
+  log("       or");
+  log("       rocket 4 5");
+  log("  5) When low on energy, move next to a B and:");
+  log("       dock");
+  log("");
+  log("You can type 'instructions' any time in the game to see the full guide.");
+}
+
+
+
+  
+
 function printHelp() {
   log("");
-  log("Available commands:");
+  log("Available commands (first 3 letters are enough):");
   log("  status           - Show ship status");
   log("  srs              - Short-range scan (current quadrant)");
   log("  lrs              - Long-range scan (nearby quadrants)");
@@ -718,9 +842,48 @@ function printHelp() {
   log("  rocket x y       - Fire a Reese Rocket at sector (1-8,1-8)");
   log("  dock             - Dock at nearby base to refuel & repair");
   log("  shield amount    - Move energy to/from Tía Jacky Shield");
-  log("  help             - Show this help");
+  log("  instructions     - Show how to play");
+  log("  demo             - Show example sequence");
+  log("  help / computer  - Show this help list");
   log("");
 }
+
+const COMMANDS = {
+  status: "status",
+  srs: "srs",
+  lrs: "lrs",
+  map: "map",
+  go: "go",
+  warp: "warp",
+  laser: "laser",
+  rocket: "rocket",
+  dock: "dock",
+  shield: "shield",
+  help: "help",
+  computer: "computer",
+  instructions: "instructions",
+  demo: "demo"
+};
+
+function resolveCommand(input) {
+  const cmd = input.toLowerCase();
+  // exact match
+  if (COMMANDS[cmd]) return COMMANDS[cmd];
+
+  // allow abbreviations of at least 3 letters if unambiguous
+  if (cmd.length >= 3) {
+    const matches = Object.keys(COMMANDS).filter(name => name.startsWith(cmd));
+    if (matches.length === 1) {
+      return COMMANDS[matches[0]];
+    }
+  }
+  return null;
+}
+
+
+
+
+  
 
 // Main command handler
 function handleCommand() {
@@ -729,19 +892,33 @@ function handleCommand() {
   if (!raw) return;
   log("> " + raw);
 
+  // 1) Start menu choice
+  if (awaitingStartMenuChoice) {
+    handleStartMenuChoice(raw);
+    return;
+  }
+
+  // 2) Captain choice
   if (awaitingCaptainChoice) {
     finalizeCaptain(raw);
     return;
   }
 
+  // 3) After game over
   if (!player.alive) {
     log("The game has ended. Reload the page to start a new mission.");
     return;
   }
 
   const parts = raw.split(/\s+/);
-  const cmd = parts[0].toLowerCase();
+  const cmdInput = parts[0].toLowerCase();
   const args = parts.slice(1);
+
+  const cmd = resolveCommand(cmdInput);
+  if (!cmd) {
+    log("Unknown or ambiguous command. Type 'help' or 'com' for a list of commands.");
+    return;
+  }
 
   switch (cmd) {
     case "status":
@@ -775,7 +952,14 @@ function handleCommand() {
       cmdShield(args);
       break;
     case "help":
+    case "computer":
       printHelp();
+      break;
+    case "instructions":
+      printInstructions();
+      break;
+    case "demo":
+      printDemo();
       break;
     default:
       log("Unknown command. Type 'help' for a list of commands.");
