@@ -294,7 +294,11 @@ function longRangeScan() {
       } else {
         const q = galaxy[qx][qy];
         q.explored = true; // reveal on map
-        const code = "" + q.rattlers + q.bases.length + q.stars;
+        const code = "" + const r = Math.min(q.rattlers, 9);
+        const b = Math.min(q.bases.length, 9);
+        const s = Math.min(q.stars, 9);
+        const code = "" + r + b + s;
+q.rattlers + q.bases.length + q.stars;
         row += " " + code.padStart(3, "0") + " ";
       }
     }
